@@ -120,7 +120,7 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
 )
 
 # Add linked libraries
-target_link_libraries(${CMAKE_PROJECT_NAME} ${link_LIBS})
+target_link_libraries(${CMAKE_PROJECT_NAME} ${link_LIBS} m)
 
 # Compiler options
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
