@@ -43,13 +43,19 @@ void Thermal_Init(void)
   */
 uint16_t Thermal_GetADCValue(void)
 {
-    // 【修改处】：配置规则组通道为 ADC_Channel_3 (对应 PA3)
-    ADC_RegularChannelConfig(ADC1, ADC_Channel_3, 1, ADC_SampleTime_55Cycles5);
+    // 1. 将采样周期改为最长：ADC_SampleTime_239Cycles5
+    ADC_RegularChannelConfig(ADC1, ADC_Channel_3, 1, ADC_SampleTime_239Cycles5);
     
+    // 2. 第一次转换：假读 (Dummy Read)，用来给采样电容充电，覆盖掉上一个通道的残留电压
     ADC_SoftwareStartConvCmd(ADC1, ENABLE);
     while (ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC) == RESET);
+    ADC_GetConversionValue(ADC1); // 读出来的数据直接丢弃，不保存
     
+    // 3. 第二次转换：真读，这才是当前通道最准确的电压
+    ADC_SoftwareStartConvCmd(ADC1, ENABLE);
+    while (ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC) == RESET);
     return ADC_GetConversionValue(ADC1);
+
 }
 
 /**

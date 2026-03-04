@@ -74,10 +74,10 @@ uint8_t Key_GetNum(void)
     else if (adc_value > 500 && adc_value < 900) {
         key_num = 2; // SW2 被按下 (约 738)
     } 
-    else if (adc_value > 1100 && adc_value < 1400) {
+    else if (adc_value > 2000 && adc_value < 2400) {
         key_num = 3; // SW3 被按下 (约 1251)
     } 
-    else if (adc_value > 1700 && adc_value < 2200) {
+    else if (adc_value > 2400 && adc_value < 2700) {
         key_num = 4; // SW4 被按下 (约 1951)
     }
 

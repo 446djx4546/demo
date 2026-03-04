@@ -32,39 +32,68 @@
 
 int main(void)
 {
+    uint16_t adc_value = 0;
+    uint8_t key_num = 0;
+
+    Key_Init();
     OLED_Init();
     Thermal_Init(); 
     LightSensor_Init(); // 初始化光敏传感器
 
-    OLED_ShowString(1, 1, "Temp:");
-    OLED_ShowString(3, 1, "Light:");
+    // 显示静态文本模板，利用屏幕的全部4行
+    OLED_ShowString(1, 1, "ADC Value:");
+    OLED_ShowString(2, 1, "Key:");
+    OLED_ShowString(3, 1, "Temp :");
+    OLED_ShowString(4, 1, "Light:");
 
     while (1) 
     {
-        // === 1. 读取并显示温度 ===
+        // ================== 0. 按键状态处理 ==================
+        // 从按键模块获取ADC值和键码
+        adc_value = Key_GetADCValue();
+        key_num = Key_GetNum();
+
+        // 将 ADC 原始值显示在第一行
+        OLED_ShowNum(1, 12, adc_value, 4);
+
+        // 显示按键状态
+        if (key_num == 0) {
+            OLED_ShowString(2, 6, "None "); 
+        } else {
+            OLED_ShowString(2, 6, "SW  ");
+            OLED_ShowNum(2, 8, key_num, 1);
+        }
+
+
+        // ================== 1. 热敏传感器数据处理 ==================
+        // 获取并显示实际温度 (摄氏度)
         float temp = Thermal_GetTemp();
         int temp_int = (int)temp;                            
         int temp_frac = (int)((temp - temp_int) * 100);      
         
         if(temp < 0) {
-            OLED_ShowChar(1, 6, '-');
+            OLED_ShowChar(3, 7, '-');
             temp_int = -temp_int;
             temp_frac = -temp_frac;
         } else {
-            OLED_ShowChar(1, 6, '+');
+            OLED_ShowChar(3, 7, '+');
         }
 
-        OLED_ShowNum(1, 7, temp_int, 2);       
-        OLED_ShowChar(1, 9, '.');
-        OLED_ShowNum(1, 10, temp_frac, 2);     
-        OLED_ShowString(1, 12, " C");
+        OLED_ShowNum(3, 8, temp_int, 2);       
+        OLED_ShowChar(3, 10, '.');
+        OLED_ShowNum(3, 11, temp_frac, 2);     
+        OLED_ShowString(3, 13, " C");
 
-        // === 2. 读取并显示光照强度 ===
+
+        // ================== 2. 光敏传感器数据处理 ==================
+        // 获取并显示光照强度 (百分比)
         uint8_t light_percent = LightSensor_GetIntensity();
         
-        OLED_ShowNum(3, 7, light_percent, 3);
-        OLED_ShowChar(3, 10, '%');
+        OLED_ShowNum(4, 8, light_percent, 3);
+        OLED_ShowChar(4, 11, '%');
+        OLED_ShowString(4, 12, "   "); // 加空格清除可能残留的字符
 
-        Delay_ms(100); // 延时刷新
+        // 延时刷新，防止屏幕闪烁
+        Delay_ms(100); 
     }
 }

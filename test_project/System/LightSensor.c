@@ -42,12 +42,17 @@ void LightSensor_Init(void)
   */
 uint16_t LightSensor_GetADCValue(void)
 {
-    // 配置规则组通道：ADC1, 通道2 (PA2), 序列1, 采样时间55.5个周期
-    ADC_RegularChannelConfig(ADC1, ADC_Channel_2, 1, ADC_SampleTime_55Cycles5);
+   // 1. 将采样周期改为最长：ADC_SampleTime_239Cycles5
+    ADC_RegularChannelConfig(ADC1, ADC_Channel_2, 1, ADC_SampleTime_239Cycles5);
     
+    // 2. 第一次转换：假读 (Dummy Read)，消除通道切换带来的串扰
     ADC_SoftwareStartConvCmd(ADC1, ENABLE);
     while (ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC) == RESET);
+    ADC_GetConversionValue(ADC1); // 丢弃第一次的结果
     
+    // 3. 第二次转换：获取干净真实的数据
+    ADC_SoftwareStartConvCmd(ADC1, ENABLE);
+    while (ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC) == RESET);
     return ADC_GetConversionValue(ADC1);
 }
 
@@ -59,14 +64,11 @@ uint8_t LightSensor_GetIntensity(void)
 {
     uint16_t adc_val = LightSensor_GetADCValue();
     
-    // 将 0~4095 的 ADC 值映射到 0~100 的百分比
-    // 【注意硬件分压方向】：
-    // 大部分光敏模块在光照越强时，输出的模拟电压越低 (ADC值越小)。
-    // 如果你发现越亮的时候百分比反而越低，请将下面的公式改为：
-    // float percentage = (4095.0f - (float)adc_val) / 4095.0f * 100.0f;
+    // 【修改处】：将公式反转。因为光照越强，adc_val 越小。
+    // 用 4095 减去 adc_val，就能算出真实的相对光照强度百分比了
+    float percentage = (4095.0f - (float)adc_val) / 4095.0f * 100.0f;
     
-    float percentage = (float)adc_val / 4095.0f * 100.0f;
-    
+    // 限制上下限，防止计算出现溢出
     if (percentage > 100.0f) percentage = 100.0f;
     if (percentage < 0.0f) percentage = 0.0f;
 
