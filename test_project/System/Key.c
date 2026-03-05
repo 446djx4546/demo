@@ -62,24 +62,35 @@ uint16_t Key_GetADCValue(void)
 uint8_t Key_GetNum(void)
 {
     uint16_t adc_value = Key_GetADCValue();
-    uint8_t key_num = 0;
+    uint8_t current_key = 0;
 
-    // 根据原理图分压计算的阈值进行判断
-    if (adc_value > 3800) {
-        key_num = 0; // 无按键按下 (约 4095)
-    } 
-    else if (adc_value < 200) {
-        key_num = 1; // SW1 被按下 (直接接地，约 0)
+    // 1. 获取当前按下的是哪个键
+    if (adc_value < 200) {
+        current_key = 1; // SW1
     } 
     else if (adc_value > 500 && adc_value < 900) {
-        key_num = 2; // SW2 被按下 (约 738)
+        current_key = 2; // SW2
     } 
     else if (adc_value > 2000 && adc_value < 2400) {
-        key_num = 3; // SW3 被按下 (约 1251)
+        current_key = 3; // SW3
     } 
     else if (adc_value > 2400 && adc_value < 2700) {
-        key_num = 4; // SW4 被按下 (约 1951)
+        current_key = 4; // SW4
     }
 
-    return key_num;
+    // 2. 核心边缘检测逻辑（静态变量会记住上一次的值）
+    static uint8_t last_key = 0; 
+    uint8_t valid_key = 0;
+
+    // 如果这次按下了按键，且上一次是没有按下的状态（说明是刚按下的瞬间）
+    if (current_key != 0 && last_key == 0) 
+    {
+        valid_key = current_key; // 记录下有效键值
+    }
+
+    // 更新上一次的状态，供下一次循环使用
+    last_key = current_key; 
+
+    // 只在按下的瞬间返回 1~4，按住不放或者松开时都返回 0
+    return valid_key; 
 }

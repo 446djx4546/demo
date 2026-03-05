@@ -43,12 +43,14 @@ set(cpu_PARAMS
 # Sources
 set(sources_SRCS
 	${CMAKE_CURRENT_SOURCE_DIR}/Src/main.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/CMSIS/CM3/DeviceSupport/ST/STM32F10x/system_stm32f10x.c
 )
 
 # Include directories for all compilers
 set(include_DIRS
 	${CMAKE_CURRENT_SOURCE_DIR}/Inc
     ${CMAKE_CURRENT_SOURCE_DIR}/System
+    ${CMAKE_CURRENT_SOURCE_DIR}/System/Menu
 )
 
 # Include directories for each compiler
@@ -92,7 +94,8 @@ add_executable(${CMAKE_PROJECT_NAME})
 # Add sources to executable
 aux_source_directory(Libraries/STM32F10x_StdPeriph_Driver/src/ SPL_SOURCE)#add SPL source
 aux_source_directory(System/ SYSTEM_SOURCE)#add System source
-target_sources(${CMAKE_PROJECT_NAME} PUBLIC ${sources_SRCS} ${SPL_SOURCE} ${SYSTEM_SOURCE})
+aux_source_directory(System/Menu MENU_SOURCE)# Add menu source
+target_sources(${CMAKE_PROJECT_NAME} PUBLIC ${sources_SRCS} ${SPL_SOURCE} ${SYSTEM_SOURCE} ${MENU_SOURCE})
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
@@ -151,6 +154,7 @@ target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
     -Wl,-Map=${CMAKE_PROJECT_NAME}.map
     -u _printf_float # STDIO float formatting support (remove if not used)
     --specs=nosys.specs
+    --specs=nano.specs
     -Wl,--start-group
     -lc
     -lm

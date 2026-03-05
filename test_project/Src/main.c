@@ -27,73 +27,51 @@
 #include "Buzzer.h"
 #include "Thermal.h"
 #include "LightSensor.h"
-
+#include "DHT11.h"
+#include "MenuSetting.h"
+#include "MenuSelector.h"
 
 
 int main(void)
 {
-    uint16_t adc_value = 0;
-    uint8_t key_num = 0;
+    // 0. 初始化系统时钟和延时函数
+    SystemInit();//配置系统时钟为72M	
+	Delay_init(72);
 
-    Key_Init();
+    // 1. 初始化所有底层硬件
     OLED_Init();
+    Key_Init();
+    Buzzer_Init();
     Thermal_Init(); 
-    LightSensor_Init(); // 初始化光敏传感器
+    LightSensor_Init();
+    DHT11_Init();
 
-    // 显示静态文本模板，利用屏幕的全部4行
-    OLED_ShowString(1, 1, "ADC Value:");
-    OLED_ShowString(2, 1, "Key:");
-    OLED_ShowString(3, 1, "Temp :");
-    OLED_ShowString(4, 1, "Light:");
+    // 2. 初始化菜单树
+    MenuInit();
 
     while (1) 
     {
-        // ================== 0. 按键状态处理 ==================
-        // 从按键模块获取ADC值和键码
-        adc_value = Key_GetADCValue();
-        key_num = Key_GetNum();
+        // 3. 获取按键输入
+        uint8_t key_num = Key_GetNum();
 
-        // 将 ADC 原始值显示在第一行
-        OLED_ShowNum(1, 12, adc_value, 4);
-
-        // 显示按键状态
-        if (key_num == 0) {
-            OLED_ShowString(2, 6, "None "); 
-        } else {
-            OLED_ShowString(2, 6, "SW  ");
-            OLED_ShowNum(2, 8, key_num, 1);
+        // 4. 根据按键执行菜单操作 (你需要根据实际按键顺序微调这里)
+        if (key_num == 2) {
+            SelectUP();        // SW2: 向上移动光标
+        } 
+        else if (key_num == 4) {
+            SelectDOWN();      // SW4: 向下移动光标
+        } 
+        else if (key_num == 3) {
+            SelectINorRUN();   // SW3: 确认 / 进入子菜单 / 执行函数
+        } 
+        else if (key_num == 1) {
+            SelectOut();       // SW1: 返回上一级
         }
 
+        // 5. 刷新菜单显示
+        PrintSelector();
 
-        // ================== 1. 热敏传感器数据处理 ==================
-        // 获取并显示实际温度 (摄氏度)
-        float temp = Thermal_GetTemp();
-        int temp_int = (int)temp;                            
-        int temp_frac = (int)((temp - temp_int) * 100);      
-        
-        if(temp < 0) {
-            OLED_ShowChar(3, 7, '-');
-            temp_int = -temp_int;
-            temp_frac = -temp_frac;
-        } else {
-            OLED_ShowChar(3, 7, '+');
-        }
-
-        OLED_ShowNum(3, 8, temp_int, 2);       
-        OLED_ShowChar(3, 10, '.');
-        OLED_ShowNum(3, 11, temp_frac, 2);     
-        OLED_ShowString(3, 13, " C");
-
-
-        // ================== 2. 光敏传感器数据处理 ==================
-        // 获取并显示光照强度 (百分比)
-        uint8_t light_percent = LightSensor_GetIntensity();
-        
-        OLED_ShowNum(4, 8, light_percent, 3);
-        OLED_ShowChar(4, 11, '%');
-        OLED_ShowString(4, 12, "   "); // 加空格清除可能残留的字符
-
-        // 延时刷新，防止屏幕闪烁
-        Delay_ms(100); 
+        // 6. 稍微延时，作为简单的按键防抖和控制刷新率
+        Delay_ms(50); 
     }
 }
