@@ -49,7 +49,9 @@ void PrintSelector() {
 	for (int i = 0; i < blk->block_pointer && node != NULL; i++) {
 		node = node->nextNode;
 	}
-	for (int i = 0; i < blk->length && node != NULL; i++) {
+    
+    int i; // 把变量 i 提出来，为了后面清除多余行使用
+	for (i = 0; i < blk->length && node != NULL; i++) {
 		int index = blk->block_pointer + i;
 		char buf[64];
 
@@ -63,4 +65,10 @@ void PrintSelector() {
 
 		node = node->nextNode;
 	}
+    
+    // 【关键修复】：如果当前菜单项少于屏幕最大显示行数 (blk->length)，
+    // 用纯空格把剩余的行覆盖掉，防止显示上一页的残留字符。
+    for (; i < 4; i++) {
+        PrintStringLine(i, "                "); // 打印16个空格
+    }
 }
