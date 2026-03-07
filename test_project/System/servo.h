@@ -11,5 +11,7 @@
 void SERVO_Init(void);
 void PWM_SetCompare1(uint16_t Compare); // 改为 Channel 1
 void Servo_SetAngle(float Angle);
+// 声明获取舵机状态的函数
+uint8_t Servo_GetState(void);
 
 #endif

@@ -54,9 +54,6 @@ int main(void)
     LED_PWM_Init();
     Motor_Init();
 
-    Motor_SetSpeed(-25);
-    Delay_ms(2000);
-
 
     // 2. 初始化菜单树
     MenuInit();

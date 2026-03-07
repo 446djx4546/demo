@@ -1,5 +1,7 @@
 #include "led_pwm.h"
 
+static uint8_t current_brightness = 0;
+
 /**
  * @brief  初始化 LED PWM (引脚 PA8, 定时器 TIM1_CH1)
  * @note   基于 72MHz 系统主频，PWM 频率设置为 1kHz
@@ -54,14 +56,17 @@ void LED_PWM_Init(void)
  */
 void LED_SetBrightness(uint8_t brightness)
 {
-    // 限制输入范围，防止溢出
     if (brightness > 100) {
         brightness = 100;
     }
     
-    // 将 0~100 的百分比线性映射到 0~1000 的比较值(CCR1)中
-    uint16_t compare_value = (uint16_t)(brightness * 10); 
+    current_brightness = brightness; // 保存当前亮度状态
     
-    // 动态修改 TIM1 通道 1 的比较寄存器值，从而改变占空比
+    uint16_t compare_value = (uint16_t)(brightness * 10); 
     TIM_SetCompare1(TIM1, compare_value);
+}
+
+uint8_t LED_GetBrightness(void)
+{
+    return current_brightness;
 }

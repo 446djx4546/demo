@@ -1,5 +1,7 @@
 #include "servo.h"
 
+static uint8_t current_servo_state = 0;
+
 void SERVO_Init(void)
 {
 	// 1. 开启 TIM3 时钟 (PA6 对应 TIM3)
@@ -46,6 +48,17 @@ void PWM_SetCompare1(uint16_t Compare)
 
 void Servo_SetAngle(float Angle)
 {
-	// 加上 .0 保证浮点运算更严谨，避免 C 语言潜在的隐式整数除法截断问题
+    // 根据角度更新状态：假设角度大于 0 即为开启状态
+    if (Angle > 0.0f) {
+        current_servo_state = 1;
+    } else {
+        current_servo_state = 0;
+    }
+
 	PWM_SetCompare1((uint16_t)(Angle / 180.0 * 2000.0 + 500.0));
+}
+
+uint8_t Servo_GetState(void)
+{
+    return current_servo_state;
 }

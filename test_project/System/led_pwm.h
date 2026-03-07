@@ -6,5 +6,7 @@
 // 声明初始化和亮度设置函数
 void LED_PWM_Init(void);
 void LED_SetBrightness(uint8_t brightness);
+// 声明获取亮度的函数
+uint8_t LED_GetBrightness(void);
 
 #endif

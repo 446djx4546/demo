@@ -1,5 +1,7 @@
 #include "motor.h"
 
+static int current_motor_speed = 0;
+
 // ==========================================
 // 初始化电机控制引脚及定时器 (TIM3)
 // ==========================================
@@ -56,25 +58,31 @@ void Motor_Init(void)
 // ==========================================
 void Motor_SetSpeed(int speed)
 {
+    // 在限幅之前或之后保存都可以，最好保存限幅后的真实转速
+    if (speed > 100) speed = 100;    
+    if (speed < -100) speed = -100;  
+    
+    current_motor_speed = speed; // 保存当前速度
+
     if (speed > 0)
     {
-        // 正转: PA7 输出 PWM, PB0 保持低电平 (占空比 0)
-        if (speed > 100) speed = 100;    // 限幅
-        TIM_SetCompare2(TIM3, speed);    // PA7
-        TIM_SetCompare3(TIM3, 0);        // PB0
+        TIM_SetCompare2(TIM3, speed);    
+        TIM_SetCompare3(TIM3, 0);        
     }
     else if (speed < 0)
     {
-        // 反转: PA7 保持低电平, PB0 输出 PWM
-        if (speed < -100) speed = -100;  // 限幅
-        TIM_SetCompare2(TIM3, 0);        // PA7
-        TIM_SetCompare3(TIM3, -speed);   // PB0 (取正值作为占空比)
+        TIM_SetCompare2(TIM3, 0);        
+        TIM_SetCompare3(TIM3, -speed);   
     }
     else
     {
-        // 停止: 两端都拉低
         TIM_SetCompare2(TIM3, 0);
         TIM_SetCompare3(TIM3, 0);
     }
+}
+
+int Motor_GetSpeed(void)
+{
+    return current_motor_speed;
 }
 
