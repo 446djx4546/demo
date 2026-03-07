@@ -28,6 +28,10 @@
 #include "Thermal.h"
 #include "LightSensor.h"
 #include "DHT11.h"
+#include "MQ2.h"
+#include "SERVO.h"
+#include "led_pwm.h"
+#include "motor.h"
 #include "MenuSetting.h"
 #include "MenuSelector.h"
 
@@ -45,6 +49,14 @@ int main(void)
     Thermal_Init(); 
     LightSensor_Init();
     DHT11_Init();
+    MQ2_Init();
+    SERVO_Init();
+    LED_PWM_Init();
+    Motor_Init();
+
+    Motor_SetSpeed(-25);
+    Delay_ms(2000);
+
 
     // 2. 初始化菜单树
     MenuInit();

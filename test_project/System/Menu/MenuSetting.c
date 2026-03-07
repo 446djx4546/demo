@@ -4,6 +4,7 @@
 #include "Thermal.h"    
 #include "LightSensor.h"
 #include "DHT11.h"      // 引入你新的 DHT11 头文件
+#include "MQ2.h"
 #include "Key.h"
 #include "Delay.h"
 #include <stdio.h>
@@ -57,7 +58,14 @@ void Show_SensorFunc(void){
         OLED_ShowNum(3, 8, light_percent, 3);
         OLED_ShowString(3, 11, "%  ");
 
-        // === 5. 检测按键退出 ===
+        // === 5. 【新增】获取并显示 MQ-2 可燃气体浓度 (第 4 行) ===
+        float ppm = MQ2_GetPPM();
+        OLED_ShowString(4, 1, "Gas:  ");
+        // PPM 一般都是大于 1 的整数，这里直接强制类型转换为 int，并预留 4 位显示宽度
+        OLED_ShowNum(4, 7, (int)ppm, 4); 
+        OLED_ShowString(4, 11, " PPM");
+
+        // === 6. 检测按键退出 ===
         if (Key_GetNum() == 1) { // 按 SW1 退出
             OLED_Clear(); 
             break;
