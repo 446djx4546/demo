@@ -42,7 +42,7 @@ uint16_t MQ2_GetADCValue(void)
 }
 
 /**
-  * @brief  获取 MQ-2 气体浓度 PPM 值
+  * @brief  获取 MQ-2 气体浓度 PPM 值 (抗溢出加固版)
   * @retval 气体浓度 PPM
   */
 float MQ2_GetPPM(void)
@@ -58,21 +58,31 @@ float MQ2_GetPPM(void)
     }
     float avgADC = (float)tempData / read_times;
     
-    // 1. 计算 PA1 引脚处的实际电压 (STM32 ADC参考电压为3.3V, 12位精度最高为4095)
+    // 1. 计算 PA1 引脚处的实际电压 (STM32 ADC参考电压为3.3V)
     float V_PA1 = (avgADC * 3.3f) / 4095.0f;
     
-    // 2. 还原传感器引脚的真实输出电压 (硬件有 10k/10k 分压，所以乘以 2)
+    // 2. 还原传感器引脚的真实输出电压 (10k/10k 分压，乘以 2)
     float Vol = V_PA1 * 2.0f;
     
-    // 防止除以 0 的异常保护
+    // 【关键修复：硬件误差限幅保护】
+    // 防止电压过低除以0，或者电压过高(>5V)导致计算出负数电阻
     if(Vol <= 0.01f) Vol = 0.01f; 
+    if(Vol >= 4.99f) Vol = 4.99f; // 强制封顶，保证 5.0 - Vol 永远是正数！
     
     // 3. 计算传感器电阻 RS
     float RS = (5.0f - Vol) / (Vol * 0.5f);
     
+    // 二次保护：防止极度接近 5V 时 RS 变得非常接近 0 导致溢出
+    if(RS < 0.01f) RS = 0.01f;
+    
     // 4. 计算 PPM 浓度
-    float R0 = 6.64f; // 经验值，若想更准需在纯净空气中预热后测定
+    float R0 = 6.64f; 
     float ppm = pow(11.5428f * R0 / RS, 0.6549f);
+    
+    // 【显示美化】：对于异常大的数值进行封顶限制，防止屏幕显示越界
+    if (ppm > 9999.0f) {
+        ppm = 9999.0f;
+    }
     
     return ppm;
 }
