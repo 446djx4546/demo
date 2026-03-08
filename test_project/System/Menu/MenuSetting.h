@@ -8,6 +8,7 @@ void MenuInit();
 
 /***********************/
 void myOLEDPrintStringLine(int line, const char* str);
+void Run_Background_Task(void);
 
 #define Simulate_Mode -1
 #define RealOLED_Mode 1

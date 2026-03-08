@@ -60,6 +60,9 @@ int main(void)
 
     while (1) 
     {
+        // === 执行后台传感器读取与仲裁任务 ===
+        Run_Background_Task();
+
         // 3. 获取按键输入
         uint8_t key_num = Key_GetNum();
 

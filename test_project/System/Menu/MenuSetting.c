@@ -23,10 +23,70 @@ int humi_limit = 70;
 int gas_limit  = 1000;     
 uint8_t sys_mode = 0;      
 
+/* ================== 全局传感器缓存 (供UI和后台共享) ================== */
+float current_temp = 0.0f;
+uint8_t current_humi = 0;
+float current_ppm = 0.0f;
+uint8_t current_light = 0;
+
+/* ================== 核心：后台监控系统 ================== */
+// 这个函数会被放在所有的死循环里，负责在后台“默默”读取和控制
+void Run_Background_Task(void) {
+    static uint8_t task_tick = 0;
+    static uint8_t dht_tick = 0;
+    task_tick++;
+
+    // 降低执行频率（约 0.5s 执行一次），防止占用过多 CPU 导致按键卡顿
+    if (task_tick >= 10) {
+        task_tick = 0;
+
+        // 1. 读取响应较快的传感器
+        current_temp = Thermal_GetTemp();
+        current_ppm = MQ2_GetPPM();
+        current_light = LightSensor_GetIntensity();
+
+        // 2. DHT11 响应慢，约每 1.5s 读一次，保护传感器
+        dht_tick++;
+        if (dht_tick >= 3) {
+            dht_tick = 0;
+            uint8_t dht_t = 0;
+            DHT11_Read_Data(&dht_t, &current_humi);
+        }
+
+        // 3. 综合报警与状态仲裁逻辑
+        uint8_t need_alarm = 0;         
+        int target_motor = 0;           
+        float target_servo = 0.0f;      
+
+        if (current_temp >= temp_limit_2) {
+            need_alarm = 1; target_motor = 10; target_servo = 90.0f;
+        } else if (current_temp >= temp_limit_1) {
+            need_alarm = 1; target_motor = 10;
+        }
+        if (current_humi >= humi_limit) {
+            need_alarm = 1; target_motor = 10;
+        }
+        if (current_ppm >= gas_limit) {
+            need_alarm = 1; target_motor = 10; target_servo = 90.0f;
+        }
+
+        // 4. 统一执行外设控制 (仅在 AUTO 模式)
+        if (sys_mode == 0) {
+            Motor_SetSpeed(target_motor);
+            Servo_SetAngle(target_servo);
+        }
+
+        // 5. 报警控制
+        if (need_alarm) {
+            Buzzer_Sound(50); 
+        }
+    }
+}
+
+
 /* ================== 读取存储设置的函数 ================== */
 void Load_Settings_From_Flash(void) {
     Store_Init(); 
-
     if (Store_Data[1] == 0 && Store_Data[2] == 0) {
         Store_Data[1] = 30;     
         Store_Data[2] = 70;     
@@ -51,77 +111,24 @@ void Load_Settings_From_Flash(void) {
 }
 
 /* ================== 菜单执行函数定义 ================== */
-
 void Show_InformationFunc(void){
     OLED_Clear(); 
-    static u8 dht_update_cnt = 0; 
-    static u8 last_humi = 0;
     u8 current_page = 0; 
     u8 refresh_flag = 1; 
 
     while(1){
-        if (dht_update_cnt == 0) {
-            u8 dht_temp = 0;
-            DHT11_Read_Data(&dht_temp, &last_humi);
-        }
-        dht_update_cnt++;
-        if (dht_update_cnt >= 15) dht_update_cnt = 0;
-
-        float temp = Thermal_GetTemp();
-        float ppm = MQ2_GetPPM();
-        uint8_t light_percent = LightSensor_GetIntensity();
-
-        // ================== 综合报警与状态仲裁逻辑 ==================
-        uint8_t need_alarm = 0;         // 默认不报警
-        int target_motor = 0;           // 默认关闭风扇
-        float target_servo = 0.0f;      // 默认关闭舵机
-
-        // 1. 温度判定
-        if (temp >= temp_limit_2) {
-            need_alarm = 1;
-            target_motor = 10;   // 满足条件，标记风扇开启
-            target_servo = 90.0f; // 满足条件，标记舵机开启
-        } 
-        else if (temp >= temp_limit_1) {
-            need_alarm = 1;
-            target_motor = 10;   // 满足条件，标记风扇开启
-        }
-
-        // 2. 湿度判定
-        if (last_humi >= humi_limit) {
-            need_alarm = 1;
-            target_motor = 10;   // 湿度超标，标记风扇开启
-        }
-
-        // 3. 气体判定
-        if (ppm >= gas_limit) {
-            need_alarm = 1;
-            target_motor = 10;   // 气体超标，排气风扇开启
-            target_servo = 90.0f; // 气体超标，开窗(舵机)开启
-        }
-
-        // 统一执行外设控制 (仅在 AUTO 模式下进行覆盖)
-        if (sys_mode == 0) {
-            Motor_SetSpeed(target_motor);
-            Servo_SetAngle(target_servo);
-        }
-
-        // 统一执行蜂鸣器报警
-        if (need_alarm) {
-            Buzzer_Sound(50); 
-        }
-        // ========================================================
+        Run_Background_Task(); // <--- 关键注入：维持后台任务运行
 
         if (current_page == 0) {
             if (refresh_flag) { OLED_Clear(); refresh_flag = 0; }
-            int temp_int = (int)temp;                            
-            int temp_frac = (int)((temp - temp_int) * 100);      
+            int temp_int = (int)current_temp;                            
+            int temp_frac = (int)((current_temp - temp_int) * 100);      
             OLED_ShowString(1, 1, "Temp: ");
-            if(temp < 0) { OLED_ShowChar(1, 7, '-'); temp_int = -temp_int; temp_frac = -temp_frac; } else { OLED_ShowChar(1, 7, '+'); }
+            if(current_temp < 0) { OLED_ShowChar(1, 7, '-'); temp_int = -temp_int; temp_frac = -temp_frac; } else { OLED_ShowChar(1, 7, '+'); }
             OLED_ShowNum(1, 8, temp_int, 2); OLED_ShowChar(1, 10, '.'); OLED_ShowNum(1, 11, temp_frac, 2);     
-            OLED_ShowString(2, 1, "Humi: "); OLED_ShowNum(2, 7, last_humi, 2); OLED_ShowString(2, 9, " %  "); 
-            OLED_ShowString(3, 1, "Light:"); OLED_ShowNum(3, 8, light_percent, 3); OLED_ShowString(3, 11, "%  ");
-            OLED_ShowString(4, 1, "Gas:  "); OLED_ShowNum(4, 7, (int)ppm, 4); OLED_ShowString(4, 11, " PPM");
+            OLED_ShowString(2, 1, "Humi: "); OLED_ShowNum(2, 7, current_humi, 2); OLED_ShowString(2, 9, " %  "); 
+            OLED_ShowString(3, 1, "Light:"); OLED_ShowNum(3, 8, current_light, 3); OLED_ShowString(3, 11, "%  ");
+            OLED_ShowString(4, 1, "Gas:  "); OLED_ShowNum(4, 7, (int)current_ppm, 4); OLED_ShowString(4, 11, " PPM");
         } else {
             if (refresh_flag) { OLED_Clear(); refresh_flag = 0; }
             OLED_ShowString(1, 1, "Led_PWM: "); OLED_ShowNum(1, 10, LED_GetBrightness(), 3); OLED_ShowString(1, 13, "   ");
@@ -145,6 +152,7 @@ void Show_InformationFunc(void){
 void Set_Temp_Limit_1_Func(void) {
     OLED_Clear();
     while(1) {
+        Run_Background_Task(); // <--- 关键注入
         OLED_ShowString(1, 1, "Set Temp Thres1:");
         OLED_ShowNum(2, 1, temp_limit_1, 3);
         uint8_t key = Key_GetNum();
@@ -158,6 +166,7 @@ void Set_Temp_Limit_1_Func(void) {
 void Set_Temp_Limit_2_Func(void) {
     OLED_Clear();
     while(1) {
+        Run_Background_Task(); // <--- 关键注入
         OLED_ShowString(1, 1, "Set Temp Thres2:");
         OLED_ShowNum(2, 1, temp_limit_2, 3);
         uint8_t key = Key_GetNum();
@@ -171,6 +180,7 @@ void Set_Temp_Limit_2_Func(void) {
 void Set_Humi_Limit_Func(void) {
     OLED_Clear();
     while(1) {
+        Run_Background_Task(); // <--- 关键注入
         OLED_ShowString(1, 1, "Set Humi Thres:");
         OLED_ShowNum(2, 1, humi_limit, 3);
         uint8_t key = Key_GetNum();
@@ -184,6 +194,7 @@ void Set_Humi_Limit_Func(void) {
 void Set_Gas_Limit_Func(void) {
     OLED_Clear();
     while(1) {
+        Run_Background_Task(); // <--- 关键注入
         OLED_ShowString(1, 1, "Set Gas Thres:");
         OLED_ShowNum(2, 1, gas_limit, 4);
         uint8_t key = Key_GetNum();
@@ -198,6 +209,7 @@ void Set_Gas_Limit_Func(void) {
 void Sys_Mode_Func(void) {
     OLED_Clear();
     while(1) {
+        Run_Background_Task(); // <--- 关键注入
         OLED_ShowString(1, 1, "Mode Select:");
         if (sys_mode == 0)      OLED_ShowString(2, 1, "> AUTO    ");
         else if (sys_mode == 1) OLED_ShowString(2, 1, "> MANUAL  ");
@@ -214,6 +226,7 @@ void Manual_LED_Func(void) {
     uint8_t led_val = LED_GetBrightness();
     OLED_Clear();
     while(1) {
+        Run_Background_Task(); // <--- 关键注入
         OLED_ShowString(1, 1, "Manual LED PWM:");
         OLED_ShowNum(2, 1, led_val, 3);
         uint8_t key = Key_GetNum();
@@ -229,6 +242,7 @@ void Manual_Servo_Func(void) {
     uint8_t state = Servo_GetState();
     OLED_Clear();
     while(1) {
+        Run_Background_Task(); // <--- 关键注入
         OLED_ShowString(1, 1, "Manual Servo:");
         if (state) OLED_ShowString(2, 1, "ON (90 deg) ");
         else       OLED_ShowString(2, 1, "OFF (0 deg) ");
@@ -247,6 +261,7 @@ void Manual_Motor_Func(void) {
     int speed = Motor_GetSpeed();
     OLED_Clear();
     while(1) {
+        Run_Background_Task(); // <--- 关键注入
         OLED_ShowString(1, 1, "Manual Motor:");
         if(speed < 0) { OLED_ShowChar(2, 1, '-'); OLED_ShowNum(2, 2, -speed, 3); OLED_ShowString(2, 5, "   "); }
         else { OLED_ShowChar(2, 1, '+'); OLED_ShowNum(2, 2, speed, 3); OLED_ShowString(2, 5, "   "); }
