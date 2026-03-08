@@ -20,32 +20,35 @@ Node_t* rootNode;
 int temp_limit_1 = 30;     
 int temp_limit_2 = 35;     
 int humi_limit = 70;       
-int gas_limit  = 1000;     
+int gas_limit  = 1000;   
+int target_light = 50;     // 新增：目标光照恒定值 (0~100)
 uint8_t sys_mode = 0;      
 
-/* ================== 全局传感器缓存 (供UI和后台共享) ================== */
+/* ================== 全局传感器缓存 ================== */
 float current_temp = 0.0f;
 uint8_t current_humi = 0;
 float current_ppm = 0.0f;
 uint8_t current_light = 0;
 
-/* ================== 核心：后台监控系统 ================== */
-// 这个函数会被放在所有的死循环里，负责在后台“默默”读取和控制
+/* ================== 核心：后台监控系统 (包含PID) ================== */
 void Run_Background_Task(void) {
     static uint8_t task_tick = 0;
     static uint8_t dht_tick = 0;
+    
+    // PID 控制器静态变量
+    static float integral = 0.0f;
+    static int last_error = 0;
+
     task_tick++;
 
-    // 降低执行频率（约 0.5s 执行一次），防止占用过多 CPU 导致按键卡顿
     if (task_tick >= 10) {
         task_tick = 0;
 
-        // 1. 读取响应较快的传感器
+        // 1. 读取传感器
         current_temp = Thermal_GetTemp();
         current_ppm = MQ2_GetPPM();
         current_light = LightSensor_GetIntensity();
 
-        // 2. DHT11 响应慢，约每 1.5s 读一次，保护传感器
         dht_tick++;
         if (dht_tick >= 3) {
             dht_tick = 0;
@@ -53,36 +56,64 @@ void Run_Background_Task(void) {
             DHT11_Read_Data(&dht_t, &current_humi);
         }
 
-        // 3. 综合报警与状态仲裁逻辑
+        // 2. 综合报警仲裁
         uint8_t need_alarm = 0;         
         int target_motor = 0;           
         float target_servo = 0.0f;      
 
         if (current_temp >= temp_limit_2) {
-            need_alarm = 1; target_motor = 10; target_servo = 90.0f;
+            need_alarm = 1; target_motor = 100; target_servo = 90.0f;
         } else if (current_temp >= temp_limit_1) {
-            need_alarm = 1; target_motor = 10;
+            need_alarm = 1; target_motor = 100;
         }
         if (current_humi >= humi_limit) {
-            need_alarm = 1; target_motor = 10;
+            need_alarm = 1; target_motor = 100;
         }
         if (current_ppm >= gas_limit) {
-            need_alarm = 1; target_motor = 10; target_servo = 90.0f;
+            need_alarm = 1; target_motor = 100; target_servo = 90.0f;
         }
 
-        // 4. 统一执行外设控制 (仅在 AUTO 模式)
+        // 3. 统一执行外设控制 (仅在 AUTO 模式下)
         if (sys_mode == 0) {
             Motor_SetSpeed(target_motor);
             Servo_SetAngle(target_servo);
+            
+            // === 闭环 PID 恒定光照控制 ===
+            float Kp = 2.0f;   // 比例系数：响应当前误差的速度
+            float Ki = 0.5f;   // 积分系数：消除稳态误差（维持恒定输出的主力）
+            float Kd = 0.1f;   // 微分系数：抑制超调震荡
+
+            int error = target_light - current_light;
+            integral += (float)error;
+            
+            // 积分限幅抗饱和 (Anti-windup)，防止遇到强光或黑夜时积分过度累积
+            if (integral > 200.0f) integral = 200.0f;
+            if (integral < 0.0f)   integral = 0.0f; 
+
+            // 计算 PID 输出
+            float pid_out = Kp * error + Ki * integral + Kd * (error - last_error);
+            last_error = error;
+
+            // 输出限幅 (占空比只能是 0~100)
+            if (pid_out > 100.0f) pid_out = 100.0f;
+            if (pid_out < 0.0f)   pid_out = 0.0f;
+
+            LED_SetBrightness((uint8_t)pid_out);
+            // ============================
+
+        } else {
+            // 【无扰切换机制】如果在手动模式下，系统停止 PID 运算
+            // 并且将积分器同步为“手动设定的LED亮度”，保证切回 Auto 模式时，亮度不会发生突变
+            integral = (float)LED_GetBrightness() / 0.5f; // 除以 Ki 逆推积分量
+            last_error = 0;
         }
 
-        // 5. 报警控制
+        // 4. 报警控制
         if (need_alarm) {
             Buzzer_Sound(50); 
         }
     }
 }
-
 
 /* ================== 读取存储设置的函数 ================== */
 void Load_Settings_From_Flash(void) {
@@ -96,6 +127,7 @@ void Load_Settings_From_Flash(void) {
         Store_Data[6] = 0;      
         Store_Data[7] = 100;    
         Store_Data[8] = 35;     
+        Store_Data[9] = 50;     // 默认光照目标恒定为 50%
         Store_Save();
     }
     
@@ -104,6 +136,7 @@ void Load_Settings_From_Flash(void) {
     gas_limit    = Store_Data[3];
     sys_mode     = Store_Data[4];
     temp_limit_2 = Store_Data[8];
+    target_light = Store_Data[9]; 
     
     LED_SetBrightness((uint8_t)Store_Data[5]);
     if(Store_Data[6]) Servo_SetAngle(90.0f); else Servo_SetAngle(0.0f);
@@ -117,7 +150,7 @@ void Show_InformationFunc(void){
     u8 refresh_flag = 1; 
 
     while(1){
-        Run_Background_Task(); // <--- 关键注入：维持后台任务运行
+        Run_Background_Task(); 
 
         if (current_page == 0) {
             if (refresh_flag) { OLED_Clear(); refresh_flag = 0; }
@@ -148,11 +181,29 @@ void Show_InformationFunc(void){
     }
 }
 
-/* ================== 阈值设置函数 ================== */
+/* ================== 设置函数 ================== */
+
+// 新增：光照目标设置UI
+void Set_Target_Light_Func(void) {
+    OLED_Clear();
+    while(1) {
+        Run_Background_Task(); 
+        OLED_ShowString(1, 1, "Set Target Light");
+        OLED_ShowNum(2, 1, target_light, 3);
+        OLED_ShowString(2, 4, "%  ");
+        
+        uint8_t key = Key_GetNum();
+        if (key == 1 || key == 3) { Store_Data[9] = target_light; Store_Save(); OLED_Clear(); break; }
+        if (key == 2 && target_light < 100) target_light++;
+        if (key == 4 && target_light > 0)   target_light--;
+        Delay_ms(50);
+    }
+}
+
 void Set_Temp_Limit_1_Func(void) {
     OLED_Clear();
     while(1) {
-        Run_Background_Task(); // <--- 关键注入
+        Run_Background_Task();
         OLED_ShowString(1, 1, "Set Temp Thres1:");
         OLED_ShowNum(2, 1, temp_limit_1, 3);
         uint8_t key = Key_GetNum();
@@ -166,7 +217,7 @@ void Set_Temp_Limit_1_Func(void) {
 void Set_Temp_Limit_2_Func(void) {
     OLED_Clear();
     while(1) {
-        Run_Background_Task(); // <--- 关键注入
+        Run_Background_Task(); 
         OLED_ShowString(1, 1, "Set Temp Thres2:");
         OLED_ShowNum(2, 1, temp_limit_2, 3);
         uint8_t key = Key_GetNum();
@@ -180,7 +231,7 @@ void Set_Temp_Limit_2_Func(void) {
 void Set_Humi_Limit_Func(void) {
     OLED_Clear();
     while(1) {
-        Run_Background_Task(); // <--- 关键注入
+        Run_Background_Task(); 
         OLED_ShowString(1, 1, "Set Humi Thres:");
         OLED_ShowNum(2, 1, humi_limit, 3);
         uint8_t key = Key_GetNum();
@@ -194,7 +245,7 @@ void Set_Humi_Limit_Func(void) {
 void Set_Gas_Limit_Func(void) {
     OLED_Clear();
     while(1) {
-        Run_Background_Task(); // <--- 关键注入
+        Run_Background_Task(); 
         OLED_ShowString(1, 1, "Set Gas Thres:");
         OLED_ShowNum(2, 1, gas_limit, 4);
         uint8_t key = Key_GetNum();
@@ -209,7 +260,7 @@ void Set_Gas_Limit_Func(void) {
 void Sys_Mode_Func(void) {
     OLED_Clear();
     while(1) {
-        Run_Background_Task(); // <--- 关键注入
+        Run_Background_Task(); 
         OLED_ShowString(1, 1, "Mode Select:");
         if (sys_mode == 0)      OLED_ShowString(2, 1, "> AUTO    ");
         else if (sys_mode == 1) OLED_ShowString(2, 1, "> MANUAL  ");
@@ -226,7 +277,7 @@ void Manual_LED_Func(void) {
     uint8_t led_val = LED_GetBrightness();
     OLED_Clear();
     while(1) {
-        Run_Background_Task(); // <--- 关键注入
+        Run_Background_Task(); 
         OLED_ShowString(1, 1, "Manual LED PWM:");
         OLED_ShowNum(2, 1, led_val, 3);
         uint8_t key = Key_GetNum();
@@ -242,7 +293,7 @@ void Manual_Servo_Func(void) {
     uint8_t state = Servo_GetState();
     OLED_Clear();
     while(1) {
-        Run_Background_Task(); // <--- 关键注入
+        Run_Background_Task(); 
         OLED_ShowString(1, 1, "Manual Servo:");
         if (state) OLED_ShowString(2, 1, "ON (90 deg) ");
         else       OLED_ShowString(2, 1, "OFF (0 deg) ");
@@ -261,7 +312,7 @@ void Manual_Motor_Func(void) {
     int speed = Motor_GetSpeed();
     OLED_Clear();
     while(1) {
-        Run_Background_Task(); // <--- 关键注入
+        Run_Background_Task(); 
         OLED_ShowString(1, 1, "Manual Motor:");
         if(speed < 0) { OLED_ShowChar(2, 1, '-'); OLED_ShowNum(2, 2, -speed, 3); OLED_ShowString(2, 5, "   "); }
         else { OLED_ShowChar(2, 1, '+'); OLED_ShowNum(2, 2, speed, 3); OLED_ShowString(2, 5, "   "); }
@@ -286,7 +337,8 @@ void MenuInit() {
             SetNode(EXE_type, "Temp Thres 1", Set_Temp_Limit_1_Func), 
             SetNode(EXE_type, "Temp Thres 2", Set_Temp_Limit_2_Func), 
             SetNode(EXE_type, "Humi Thres",   Set_Humi_Limit_Func),             
-            SetNode(EXE_type, "Gas Thres",    Set_Gas_Limit_Func)             
+            SetNode(EXE_type, "Gas Thres",    Set_Gas_Limit_Func),
+            SetNode(EXE_type, "Target Light", Set_Target_Light_Func) // 将光照目标放入设置菜单
         )),
         
         SetNode(DIR_type, "Mode Setting", SetBranch(
