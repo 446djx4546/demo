@@ -19,7 +19,8 @@
 Node_t* rootNode;
 
 /* ================== 全局变量：阈值与模式 ================== */
-int temp_limit = 35;       
+int temp_limit_1 = 30;     // 阈值1：触发风扇
+int temp_limit_2 = 35;     // 阈值2：触发风扇+舵机
 int humi_limit = 70;       
 int gas_limit  = 1000;     
 uint8_t sys_mode = 0;      
@@ -30,21 +31,23 @@ void Load_Settings_From_Flash(void) {
 
     // 判断是否是第一次上电（如果 Store_Data[1] 标志性地为 0，说明还没存过真实数据）
     if (Store_Data[1] == 0 && Store_Data[2] == 0) {
-        Store_Data[1] = 35;     // 默认 Temp 阈值
+        Store_Data[1] = 30;     // 默认 Temp 阈值 1
         Store_Data[2] = 70;     // 默认 Humi 阈值
         Store_Data[3] = 1000;   // 默认 Gas 阈值
         Store_Data[4] = 0;      // 默认模式 (0为AUTO)
         Store_Data[5] = 0;      // 默认 LED 亮度
         Store_Data[6] = 0;      // 默认 Servo 状态
         Store_Data[7] = 100;    // 默认 Motor 速度 (加100偏移量防止存负数)
+        Store_Data[8] = 35;     // 默认 Temp 阈值 2 (占用新坑位)
         Store_Save();
     }
     
     // 1. 加载参数到全局变量
-    temp_limit = Store_Data[1];
-    humi_limit = Store_Data[2];
-    gas_limit  = Store_Data[3];
-    sys_mode   = Store_Data[4];
+    temp_limit_1 = Store_Data[1];
+    humi_limit   = Store_Data[2];
+    gas_limit    = Store_Data[3];
+    sys_mode     = Store_Data[4];
+    temp_limit_2 = Store_Data[8];
     
     // 2. 恢复外设的物理状态
     LED_SetBrightness((uint8_t)Store_Data[5]);
@@ -73,9 +76,36 @@ void Show_InformationFunc(void){
         float ppm = MQ2_GetPPM();
         uint8_t light_percent = LightSensor_GetIntensity();
 
-        if (temp > temp_limit || last_humi > humi_limit || ppm > gas_limit) {
+        // ================== 多级报警与控制逻辑 ==================
+        if (temp >= temp_limit_2) {
+            // 超过阈值2：蜂鸣器响，风扇开，舵机开
+            Buzzer_Sound(50); 
+            if (sys_mode == 0) { // 仅在自动模式下控制外设
+                Motor_SetSpeed(10);   
+                Servo_SetAngle(90.0f); 
+            }
+        } 
+        else if (temp >= temp_limit_1) {
+            // 在阈值1和阈值2之间：蜂鸣器响，风扇开，舵机关
+            Buzzer_Sound(50); 
+            if (sys_mode == 0) {
+                Motor_SetSpeed(10);   
+                Servo_SetAngle(0.0f);  
+            }
+        } 
+        else {
+            // 温度低于阈值1：安全，关闭设备
+            if (sys_mode == 0) {
+                Motor_SetSpeed(0);     
+                Servo_SetAngle(0.0f);  
+            }
+        }
+
+        // 其他传感器的独立报警（不影响外设，只响蜂鸣器）
+        if (last_humi > humi_limit || ppm > gas_limit) {
             Buzzer_Sound(50); 
         }
+        // ========================================================
 
         if (current_page == 0) {
             if (refresh_flag) { OLED_Clear(); refresh_flag = 0; }
@@ -107,19 +137,36 @@ void Show_InformationFunc(void){
 }
 
 /* ================== 阈值设置函数 (退出时触发 Flash 保存) ================== */
-void Set_Temp_Limit_Func(void) {
+void Set_Temp_Limit_1_Func(void) {
     OLED_Clear();
     while(1) {
-        OLED_ShowString(1, 1, "Set Temp Thres:");
-        OLED_ShowNum(2, 1, temp_limit, 3);
+        OLED_ShowString(1, 1, "Set Temp Thres1:");
+        OLED_ShowNum(2, 1, temp_limit_1, 3);
         uint8_t key = Key_GetNum();
         if (key == 1 || key == 3) { 
-            Store_Data[1] = temp_limit;
+            Store_Data[1] = temp_limit_1;
             Store_Save();
             OLED_Clear(); break; 
         } 
-        if (key == 2) temp_limit++;                        
-        if (key == 4) temp_limit--;                        
+        if (key == 2) temp_limit_1++;                        
+        if (key == 4) temp_limit_1--;                        
+        Delay_ms(50);
+    }
+}
+
+void Set_Temp_Limit_2_Func(void) {
+    OLED_Clear();
+    while(1) {
+        OLED_ShowString(1, 1, "Set Temp Thres2:");
+        OLED_ShowNum(2, 1, temp_limit_2, 3);
+        uint8_t key = Key_GetNum();
+        if (key == 1 || key == 3) { 
+            Store_Data[8] = temp_limit_2;
+            Store_Save();
+            OLED_Clear(); break; 
+        } 
+        if (key == 2) temp_limit_2++;                        
+        if (key == 4) temp_limit_2--;                        
         Delay_ms(50);
     }
 }
@@ -229,7 +276,7 @@ void Manual_Motor_Func(void) {
         
         uint8_t key = Key_GetNum();
         if (key == 1 || key == 3) { 
-            Store_Data[7] = speed + 100; // 电机可能有负转速，+100转为正数再存 Flash
+            Store_Data[7] = speed + 100; 
             Store_Save();
             OLED_Clear(); break; 
         }
@@ -248,10 +295,12 @@ void MenuInit() {
     SetNode(DIR_type, "Main Menu", SetBranch(
         SetNode(EXE_type, "View Info", Show_InformationFunc), 
         
+        // 修改了这部分，添加了阈值1和阈值2
         SetNode(DIR_type, "Sensor Thres", SetBranch(
-            SetNode(EXE_type, "Temp Thres", Set_Temp_Limit_Func), 
-            SetNode(EXE_type, "Humi Thres", Set_Humi_Limit_Func),             
-            SetNode(EXE_type, "Gas Thres",  Set_Gas_Limit_Func)             
+            SetNode(EXE_type, "Temp Thres 1", Set_Temp_Limit_1_Func), 
+            SetNode(EXE_type, "Temp Thres 2", Set_Temp_Limit_2_Func), 
+            SetNode(EXE_type, "Humi Thres",   Set_Humi_Limit_Func),             
+            SetNode(EXE_type, "Gas Thres",    Set_Gas_Limit_Func)             
         )),
         
         SetNode(DIR_type, "Mode Setting", SetBranch(
