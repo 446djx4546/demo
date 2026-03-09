@@ -51,12 +51,13 @@ int main(void)
 
     // 定义传感器数据变量
     u8 dht_temp = 0, dht_humi = 0;       // DHT11 温湿度
-    float mq2_ppm = 0.0;                 // MQ2 浓度
+    uint16_t mq2_raw_adc = 0;              // MQ2 浓度
     uint8_t light_intensity = 0;         // 光照强度
     float therm_temp = 0.0;              // 热敏温度
     
     char sendBuffer[128];                // 数据发送缓冲区
     uint16_t send_timer = 0;             // 发送频率控制定时器
+    uint16_t dht_timer = 40;
 
     while (1) 
     {
@@ -65,22 +66,30 @@ int main(void)
 
         // === ESP8266 定时数据传输逻辑 ===
         send_timer++;
-        if (send_timer >= 40) // 主循环每次延时50ms，40次即为 2000ms (2秒)
+        dht_timer++;
+
+        // 【优化点 1】：DHT11 专属定时器，严格保证每 2000ms (2秒) 读一次
+        if (dht_timer >= 40) 
         {
-            send_timer = 0; // 重置定时器
+            dht_timer = 0;
+            DHT11_Read_Data(&dht_temp, &dht_humi); 
+        }
 
-            // 读取各项传感器数据
-            DHT11_Read_Data(&dht_temp, &dht_humi);         // 读取 DHT11
-            mq2_ppm = MQ2_GetPPM();                        // 读取 MQ2 PPM 值
-            light_intensity = LightSensor_GetIntensity();  // 读取光照强度百分比
-            therm_temp = Thermal_GetTemp();                // 读取热敏电阻温度
+        // === ESP8266 定时数据传输逻辑 ===
+        if (send_timer >= 5) // 10 * 50ms = 500ms (0.5秒) 发送一次数据
+        {
+            send_timer = 0; 
 
-            // 将数据格式化为字符串 (这里将 float 强转为 int，避免部分 GCC 编译环境下不支持 printf 浮点数导致死机)
-            // 格式示例："DHT_T:25,DHT_H:60,MQ2:120,Light:80,Therm:26\n"
-            sprintf(sendBuffer, "DHT_T:%d,DHT_H:%d,MQ2:%d,Light:%d,Therm:%d\n", 
-                    dht_temp, 
+            // 其他传感器响应快，可以每 0.5s 实时读取
+            // 【优化点 2】：放弃不准确的 PPM 计算，直接获取 ADC 原始值
+            mq2_raw_adc = MQ2_GetADCValue();               
+            light_intensity = LightSensor_GetIntensity();  
+            therm_temp = Thermal_GetTemp();                
+
+            // 格式化数据，把 MQ2 的标识改成了 MQ2_RAW
+            sprintf(sendBuffer, "DHT_H:%d,MQ2_RAW:%d,Light:%d,Therm:%d\n", 
                     dht_humi, 
-                    (int)mq2_ppm, 
+                    mq2_raw_adc, 
                     light_intensity, 
                     (int)therm_temp);
 
