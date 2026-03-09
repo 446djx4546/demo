@@ -27,6 +27,8 @@
 #include "MenuSetting.h"
 #include "MenuSelector.h"
 
+extern int target_light;
+
 int main(void)
 {
     // 0. 初始化系统时钟和延时函数
@@ -51,7 +53,7 @@ int main(void)
 
     // 定义传感器数据变量
     u8 dht_temp = 0, dht_humi = 0;       // DHT11 温湿度
-    uint16_t mq2_raw_adc = 0;              // MQ2 浓度
+    uint16_t mq2_raw_adc = 0;            // MQ2 浓度
     uint8_t light_intensity = 0;         // 光照强度
     float therm_temp = 0.0;              // 热敏温度
     
@@ -68,7 +70,7 @@ int main(void)
         send_timer++;
         dht_timer++;
 
-        // 【优化点 1】：DHT11 专属定时器，严格保证每 2000ms (2秒) 读一次
+        // DHT11 专属定时器，严格保证每 2000ms (2秒) 读一次
         if (dht_timer >= 40) 
         {
             dht_timer = 0;
@@ -76,22 +78,21 @@ int main(void)
         }
 
         // === ESP8266 定时数据传输逻辑 ===
-        if (send_timer >= 5) // 10 * 50ms = 500ms (0.5秒) 发送一次数据
+        if (send_timer >= 2) 
         {
             send_timer = 0; 
 
-            // 其他传感器响应快，可以每 0.5s 实时读取
-            // 【优化点 2】：放弃不准确的 PPM 计算，直接获取 ADC 原始值
-            mq2_raw_adc = MQ2_GetADCValue();               
+            // 实时读取光敏电阻实际值
             light_intensity = LightSensor_GetIntensity();  
-            therm_temp = Thermal_GetTemp();                
+            
+            // 实时读取目前系统输出给LED的PWM占空比
+            uint8_t current_pwm_value = LED_GetBrightness();
 
-            // 格式化数据，把 MQ2 的标识改成了 MQ2_RAW
-            sprintf(sendBuffer, "DHT_H:%d,MQ2_RAW:%d,Light:%d,Therm:%d\n", 
-                    dht_humi, 
-                    mq2_raw_adc, 
+            // 【修改】PID 调试阶段的数据输出格式
+            sprintf(sendBuffer, "Target:%d,Actual:%d,PWM:%d\n", 
+                    target_light, 
                     light_intensity, 
-                    (int)therm_temp);
+                    current_pwm_value);
 
             // 通过 ESP8266 发送数据
             ESP8266_SendData(sendBuffer);

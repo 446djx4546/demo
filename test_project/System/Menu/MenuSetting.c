@@ -30,7 +30,7 @@ uint8_t current_humi = 0;
 float current_ppm = 0.0f;
 uint8_t current_light = 0;
 
-/* ================== 核心：后台监控系统 (包含PID) ================== */
+/* ================== 核心：后台监控系统 (包含极速PID) ================== */
 void Run_Background_Task(void) {
     static uint8_t task_tick = 0;
     static uint8_t dht_tick = 0;
@@ -39,15 +39,67 @@ void Run_Background_Task(void) {
     static float integral = 0.0f;
     static int last_error = 0;
 
+    static float last_pid_out = 0.0f;
+
     task_tick++;
 
+    // =========================================================================
+    // 🌟 极速读取与 PID 控制区 (每 50ms 执行一次)
+    // =========================================================================
+    
+    // 获取光照原始值
+    current_light = LightSensor_GetIntensity();
+    
+    if (sys_mode == 0) {
+        // 自动模式：使用刚刚读取到的 current_light 进行 PID 计算
+        float Kp = 2.5f;   
+        float Ki = 0.2f;   
+        float Kd = 0.4f;   
+
+        int error = target_light - current_light; 
+        float pid_out;
+
+        if (error >= -1 && error <= 1) {
+            // 当到达目标附近时，不去篡改误差骗 PID，而是直接让 PWM 保持上一次的值！
+            // 彻底切断任何计算带来的微小闪烁。
+            pid_out = last_pid_out;
+            last_error = error; // 持续跟踪真实误差，保证以后退出死区时不会突变
+        } else {
+            // 只有误差 > 1 时，才进行 PID 计算
+            if (error > -20 && error < 20) {
+                integral += (float)error;
+            }
+            
+            if (integral > 1000.0f) integral = 1000.0f; 
+            if (integral < 0.0f)    integral = 0.0f; 
+
+            pid_out = Kp * error + Ki * integral + Kd * (error - last_error);
+            last_error = error;
+        }
+        
+        // 输出限幅
+        if (pid_out > 100.0f) pid_out = 100.0f;
+        if (pid_out < 0.0f)   pid_out = 0.0f;
+
+        last_pid_out = pid_out;
+
+        LED_SetBrightness((uint8_t)pid_out);
+    } else {
+        // 手动模式：不进行 PID 输出，仅同步积分器以保证切回自动时的平滑
+        integral = (float)LED_GetBrightness() / 0.2f; 
+        last_error = 0;
+        last_pid_out = (float)LED_GetBrightness();
+    }
+
+    // =========================================================================
+    // 原本的 500ms 慢速任务（温湿度、电机、舵机、报警等保持不变）
+    // =========================================================================
     if (task_tick >= 10) {
         task_tick = 0;
 
-        // 1. 读取传感器
+        // 1. 读取温湿度和气体传感器
         current_temp = Thermal_GetTemp();
         current_ppm = MQ2_GetPPM();
-        current_light = LightSensor_GetIntensity();
 
         dht_tick++;
         if (dht_tick >= 3) {
@@ -73,40 +125,11 @@ void Run_Background_Task(void) {
             need_alarm = 1; target_motor = 10; target_servo = 90.0f;
         }
 
-        // 3. 统一执行外设控制 (仅在 AUTO 模式下)
+        // 3. 统一执行慢速外设控制 (仅在 AUTO 模式下)
         if (sys_mode == 0) {
             Motor_SetSpeed(target_motor);
             Servo_SetAngle(target_servo);
-            
-            // === 闭环 PID 恒定光照控制 ===
-            float Kp = 2.0f;   // 比例系数：响应当前误差的速度
-            float Ki = 0.5f;   // 积分系数：消除稳态误差（维持恒定输出的主力）
-            float Kd = 0.1f;   // 微分系数：抑制超调震荡
-
-            int error = target_light - current_light;
-            integral += (float)error;
-            
-            // 积分限幅抗饱和 (Anti-windup)，防止遇到强光或黑夜时积分过度累积
-            if (integral > 200.0f) integral = 200.0f;
-            if (integral < 0.0f)   integral = 0.0f; 
-
-            // 计算 PID 输出
-            float pid_out = Kp * error + Ki * integral + Kd * (error - last_error);
-            last_error = error;
-
-            // 输出限幅 (占空比只能是 0~100)
-            if (pid_out > 100.0f) pid_out = 100.0f;
-            if (pid_out < 0.0f)   pid_out = 0.0f;
-
-            LED_SetBrightness((uint8_t)pid_out);
-            // ============================
-
-        } else {
-            // 【无扰切换机制】如果在手动模式下，系统停止 PID 运算
-            // 并且将积分器同步为“手动设定的LED亮度”，保证切回 Auto 模式时，亮度不会发生突变
-            integral = (float)LED_GetBrightness() / 0.5f; // 除以 Ki 逆推积分量
-            last_error = 0;
-        }
+        } 
 
         // 4. 报警控制
         if (need_alarm) {
