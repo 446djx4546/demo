@@ -62,15 +62,15 @@ void Run_Background_Task(void) {
         float target_servo = 0.0f;      
 
         if (current_temp >= temp_limit_2) {
-            need_alarm = 1; target_motor = 100; target_servo = 90.0f;
+            need_alarm = 1; target_motor = 10; target_servo = 90.0f;
         } else if (current_temp >= temp_limit_1) {
-            need_alarm = 1; target_motor = 100;
+            need_alarm = 1; target_motor = 10;
         }
         if (current_humi >= humi_limit) {
-            need_alarm = 1; target_motor = 100;
+            need_alarm = 1; target_motor = 10;
         }
         if (current_ppm >= gas_limit) {
-            need_alarm = 1; target_motor = 100; target_servo = 90.0f;
+            need_alarm = 1; target_motor = 10; target_servo = 90.0f;
         }
 
         // 3. 统一执行外设控制 (仅在 AUTO 模式下)
