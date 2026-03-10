@@ -28,6 +28,10 @@
 #include "MenuSelector.h"
 
 extern int target_light;
+extern float Thermal_RawTemp;
+extern float MQ2_RawPPM;
+extern u8 DHT11_RawTemp;
+extern u8 DHT11_RawHumi;
 
 int main(void)
 {
@@ -53,9 +57,6 @@ int main(void)
 
     // 定义传感器数据变量
     u8 dht_temp = 0, dht_humi = 0;       // DHT11 温湿度
-    uint16_t mq2_raw_adc = 0;            // MQ2 浓度
-    uint8_t light_intensity = 0;         // 光照强度
-    float therm_temp = 0.0;              // 热敏温度
     
     char sendBuffer[128];                // 数据发送缓冲区
     uint16_t send_timer = 0;             // 发送频率控制定时器
@@ -82,17 +83,12 @@ int main(void)
         {
             send_timer = 0; 
 
-            // 实时读取光敏电阻实际值
-            light_intensity = LightSensor_GetIntensity();  
-            
-            // 实时读取目前系统输出给LED的PWM占空比
-            uint8_t current_pwm_value = LED_GetBrightness();
-
-            // 【修改】PID 调试阶段的数据输出格式
-            sprintf(sendBuffer, "Target:%d,Actual:%d,PWM:%d\n", 
-                    target_light, 
-                    light_intensity, 
-                    current_pwm_value);
+            float temp_filt = Thermal_GetTemp();
+             float mq2_filt = MQ2_GetPPM();
+       
+            sprintf(sendBuffer, "%.2f,%.2f,%.2f,%.2f\n", 
+                Thermal_RawTemp, temp_filt, 
+                MQ2_RawPPM, mq2_filt);
 
             // 通过 ESP8266 发送数据
             ESP8266_SendData(sendBuffer);

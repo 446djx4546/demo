@@ -1,7 +1,12 @@
 #include "stm32f10x.h"
 #include "MQ2.h"
 #include "Delay.h"
+#include "Kalman.h"
 #include <math.h>
+
+static Kalman_TypeDef MQ2_KF;
+
+float MQ2_RawPPM = 0.0f;
 
 /**
   * @brief  MQ-2 传感器初始化 (对应引脚 PA1)
@@ -17,8 +22,8 @@ void MQ2_Init(void)
     GPIO_InitStructure.GPIO_Pin = GPIO_Pin_1; // 【PA1】
     GPIO_Init(GPIOA, &GPIO_InitStructure);
     
-    // 注意：因为你的 LightSensor_Init 已经完整初始化了 ADC1 并做了校准，
-    // 所以这里不需要再次调用 ADC_Init() 和校准过程。
+    // 3. 初始化卡尔曼滤波器，设置过程噪声协方差 Q 和测量噪声协方差 R
+    Kalman_Init(&MQ2_KF, 0.5f, 0.1f);
 }
 
 /**
@@ -83,6 +88,8 @@ float MQ2_GetPPM(void)
     if (ppm > 9999.0f) {
         ppm = 9999.0f;
     }
+
+    MQ2_RawPPM = ppm;
     
-    return ppm;
+    return Kalman_Filter(&MQ2_KF, ppm);
 }

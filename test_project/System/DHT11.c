@@ -1,5 +1,9 @@
 #include "DHT11.h"
 #include "Delay.h"
+#include "Kalman.h"
+
+u8 DHT11_RawTemp = 0;
+u8 DHT11_RawHumi = 0;
       
 		
 //复位DHT11
@@ -87,8 +91,11 @@ u8 DHT11_Read_Data(u8 *temp,u8 *humi)
 		}
 		if((buf[0]+buf[1]+buf[2]+buf[3])==buf[4])
 		{
-			*humi=buf[0];
-			*temp=buf[2];
+			DHT11_RawHumi = buf[0];
+            DHT11_RawTemp = buf[2];
+
+			*humi = buf[0];
+			*temp = buf[2];
 		}
 	}
 	else return 1;
@@ -107,7 +114,7 @@ u8 DHT11_Init(void)
  	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
  	GPIO_Init(DHT11_GPIO_PORT, &GPIO_InitStructure);				 //初始化IO口
  	GPIO_SetBits(DHT11_GPIO_PORT,DHT11_GPIO_PIN);						 //PG11 输出高
-			    
+    
 	DHT11_Rst();  //复位DHT11
 	return DHT11_Check();//等待DHT11的回应
 } 

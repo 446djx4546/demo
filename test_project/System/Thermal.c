@@ -1,6 +1,11 @@
 #include "stm32f10x.h"
 #include "Thermal.h"
+#include "Kalman.h"
 #include <math.h>
+
+static Kalman_TypeDef Thermal_KF;
+
+float Thermal_RawTemp = 0.0f;
 
 /**
   * @brief  热敏传感器初始化 (对应引脚 PA3)
@@ -35,6 +40,9 @@ void Thermal_Init(void)
     while (ADC_GetResetCalibrationStatus(ADC1) == SET);
     ADC_StartCalibration(ADC1);
     while (ADC_GetCalibrationStatus(ADC1) == SET);
+
+    // 5. 初始化卡尔曼滤波器，设置过程噪声协方差 Q 和测量噪声协方差 R
+    Kalman_Init(&Thermal_KF, 0.01f, 0.1f);
 }
 
 /**
@@ -86,5 +94,7 @@ float Thermal_GetTemp(void)
     // 转换为摄氏度
     float T_Celsius = T_Kelvin - 273.15f;
 
-    return T_Celsius;
+    Thermal_RawTemp = T_Celsius;
+
+    return Kalman_Filter(&Thermal_KF, T_Celsius);
 }
