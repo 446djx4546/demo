@@ -27,12 +27,6 @@
 #include "MenuSetting.h"
 #include "MenuSelector.h"
 
-extern int target_light;
-extern float Thermal_RawTemp;
-extern float MQ2_RawPPM;
-extern u8 DHT11_RawTemp;
-extern u8 DHT11_RawHumi;
-
 int main(void)
 {
     // 0. 初始化系统时钟和延时函数
@@ -84,11 +78,14 @@ int main(void)
             send_timer = 0; 
 
             float temp_filt = Thermal_GetTemp();
-             float mq2_filt = MQ2_GetPPM();
-       
-            sprintf(sendBuffer, "%.2f,%.2f,%.2f,%.2f\n", 
-                Thermal_RawTemp, temp_filt, 
-                MQ2_RawPPM, mq2_filt);
+            float mq2_filt = MQ2_GetPPM();
+            uint8_t light_intensity = LightSensor_GetIntensity();
+
+            sprintf(sendBuffer, "%.2f,%.2f,%d,%d\n", 
+                temp_filt,         // %f: 浮点型
+                mq2_filt,          // %f: 浮点型
+                dht_humi,          // %d: 整型 (u8)
+                light_intensity);  // %d: 整型 (uint8_t)
 
             // 通过 ESP8266 发送数据
             ESP8266_SendData(sendBuffer);
