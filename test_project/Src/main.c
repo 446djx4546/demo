@@ -49,47 +49,10 @@ int main(void)
     // 2. 初始化菜单树
     MenuInit();
 
-    // 定义传感器数据变量
-    u8 dht_temp = 0, dht_humi = 0;       // DHT11 温湿度
-    
-    char sendBuffer[128];                // 数据发送缓冲区
-    uint16_t send_timer = 0;             // 发送频率控制定时器
-    uint16_t dht_timer = 40;
-
     while (1) 
     {
         // === 执行后台传感器读取与仲裁任务 ===
         Run_Background_Task();
-
-        // === ESP8266 定时数据传输逻辑 ===
-        send_timer++;
-        dht_timer++;
-
-        // DHT11 专属定时器，严格保证每 2000ms (2秒) 读一次
-        if (dht_timer >= 40) 
-        {
-            dht_timer = 0;
-            DHT11_Read_Data(&dht_temp, &dht_humi); 
-        }
-
-        // === ESP8266 定时数据传输逻辑 ===
-        if (send_timer >= 2) 
-        {
-            send_timer = 0; 
-
-            float temp_filt = Thermal_GetTemp();
-            float mq2_filt = MQ2_GetPPM();
-            uint8_t light_intensity = LightSensor_GetIntensity();
-
-            sprintf(sendBuffer, "%.2f,%.2f,%d,%d\n", 
-                temp_filt,         // %f: 浮点型
-                mq2_filt,          // %f: 浮点型
-                dht_humi,          // %d: 整型 (u8)
-                light_intensity);  // %d: 整型 (uint8_t)
-
-            // 通过 ESP8266 发送数据
-            ESP8266_SendData(sendBuffer);
-        }
 
         // 3. 获取按键输入
         uint8_t key_num = Key_GetNum();

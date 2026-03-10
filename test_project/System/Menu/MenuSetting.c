@@ -13,6 +13,7 @@
 #include "servo.h"
 #include "motor.h"
 #include "Store.h"
+#include "ESP8266.h"
 
 Node_t* rootNode;
 
@@ -32,19 +33,17 @@ uint8_t current_light = 0;
 
 /* ================== 核心：后台监控系统 (包含极速PID) ================== */
 void Run_Background_Task(void) {
-    static uint8_t task_tick = 0;
-    static uint8_t dht_tick = 0;
+    static uint16_t loop_tick = 0;
     
     // PID 控制器静态变量
     static float integral = 0.0f;
     static int last_error = 0;
-
     static float last_pid_out = 0.0f;
 
-    task_tick++;
+    loop_tick++;
 
     // =========================================================================
-    // 🌟 极速读取与 PID 控制区 (每 50ms 执行一次)
+    // 1. 光照 PID 控制区 (每次调用都执行，约 50ms)
     // =========================================================================
     
     // 获取光照原始值
@@ -92,21 +91,25 @@ void Run_Background_Task(void) {
     }
 
     // =========================================================================
-    // 原本的 500ms 慢速任务（温湿度、电机、舵机、报警等保持不变）
+    // 2. ESP8266 数据下发区 (每 2 次执行，约 100ms)
     // =========================================================================
-    if (task_tick >= 10) {
-        task_tick = 0;
+    if (loop_tick % 2 == 0) {
+        char sendBuffer[64];
+        float t_f = Thermal_GetTemp();
+        float m_f = MQ2_GetPPM();
+        // 格式: temp, mq2, humi, light
+        sprintf(sendBuffer, "%.2f,%.2f,%d,%d\n", t_f, m_f, current_humi, current_light);
+        ESP8266_SendData(sendBuffer);
+    }
+
+    // =========================================================================
+    // 3. 传感器读取与报警仲裁区 (每 10 次执行，约 500ms)
+    // =========================================================================
+    if (loop_tick % 5 == 0) {
 
         // 1. 读取温湿度和气体传感器
         current_temp = Thermal_GetTemp();
         current_ppm = MQ2_GetPPM();
-
-        dht_tick++;
-        if (dht_tick >= 3) {
-            dht_tick = 0;
-            uint8_t dht_t = 0;
-            DHT11_Read_Data(&dht_t, &current_humi);
-        }
 
         // 2. 综合报警仲裁
         uint8_t need_alarm = 0;         
@@ -135,6 +138,14 @@ void Run_Background_Task(void) {
         if (need_alarm) {
             Buzzer_Sound(50); 
         }
+    }
+
+    // =========================================================================
+    // 4. DHT11 慢速读取区 (每 40 次执行，约 2000ms)
+    // =========================================================================
+    if (loop_tick % 40 == 0) {
+        uint8_t dht_t = 0;
+        DHT11_Read_Data(&dht_t, &current_humi);
     }
 }
 
