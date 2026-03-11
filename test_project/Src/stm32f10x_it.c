@@ -38,6 +38,11 @@
 /*            Cortex-M3 Processor Exceptions Handlers                         */
 /******************************************************************************/
 
+#include "stm32f10x.h"
+extern char ESP8266_RX_BUF[128];
+extern uint16_t ESP8266_RX_STA;
+uint8_t ESP8266_RX_FLAG = 0;
+
 /**
   * @brief  This function handles NMI exception.
   * @param  None
@@ -156,3 +161,33 @@ void SysTick_Handler(void)
   */ 
 
 
+/**
+  * @brief  USART3 中断服务函数
+  * @note   用于逐字节接收 ESP8266 发来的数据，并在遇到回车换行时触发解析
+  */
+void USART3_IRQHandler(void)
+{
+    // 1. 正常的接收中断处理
+    if (USART_GetITStatus(USART3, USART_IT_RXNE) != RESET)
+    {
+        uint8_t res = USART_ReceiveData(USART3); 
+        
+        if (res == '\n')
+        {
+            ESP8266_RX_BUF[ESP8266_RX_STA] = '\0'; 
+            ESP8266_RX_FLAG = 1; // 【关键修改】：只立一个旗帜，绝不在中断里解析和存Flash！
+        }
+        else if (res != '\r') 
+        {
+            if (ESP8266_RX_STA < 127) ESP8266_RX_BUF[ESP8266_RX_STA++] = res;
+            else ESP8266_RX_STA = 0; 
+        }
+    }
+    
+    // 2. 【保命防死机代码】：清除 ORE 溢出错误
+    // 如果不加这段，一旦数据发太快，单片机会无限死锁在这个中断里！
+    if (USART_GetFlagStatus(USART3, USART_FLAG_ORE) != RESET)
+    {
+        USART_ReceiveData(USART3); // 读取一次数据寄存器，即可清除 ORE 错误标志
+    }
+}

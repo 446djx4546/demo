@@ -44,6 +44,7 @@ set(cpu_PARAMS
 set(sources_SRCS
 	${CMAKE_CURRENT_SOURCE_DIR}/Src/main.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/CMSIS/CM3/DeviceSupport/ST/STM32F10x/system_stm32f10x.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/stm32f10x_it.c
 )
 
 # Include directories for all compilers

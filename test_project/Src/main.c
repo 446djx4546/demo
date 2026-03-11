@@ -33,6 +33,8 @@ int main(void)
     SystemInit();//配置系统时钟为72M	
     Delay_init(72);
 
+    //NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
+
     // 1. 初始化所有底层硬件
     OLED_Init();
     Key_Init();

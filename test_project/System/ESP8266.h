@@ -11,5 +11,7 @@ void USART3_SendString(char *String);
 // ESP8266 核心业务函数
 void ESP8266_Init(void);
 void ESP8266_SendData(char *Data);
+void ESP8266_ParseCommand(void);
+
 
 #endif
