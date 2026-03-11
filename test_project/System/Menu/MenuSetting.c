@@ -61,31 +61,32 @@ void Run_Background_Task(void) {
     current_light = LightSensor_GetIntensity();
     
     if (sys_mode == 0) {
-        // 自动模式：使用刚刚读取到的 current_light 进行 PID 计算
-        float Kp = 2.5f;   
-        float Ki = 0.2f;   
-        float Kd = 0.4f;   
+        float Kp = 0.6f;   // 稍微提升一点 P，让跟踪更快 
+        float Ki = 0.1f;   
+        float Kd = 0.0f;   
 
         int error = target_light - current_light; 
         float pid_out;
 
-        if (error >= -1 && error <= 1) {
-            // 当到达目标附近时，不去篡改误差骗 PID，而是直接让 PWM 保持上一次的值！
-            // 彻底切断任何计算带来的微小闪烁。
-            pid_out = last_pid_out;
-            last_error = error; // 持续跟踪真实误差，保证以后退出死区时不会突变
-        } else {
-            // 只有误差 > 1 时，才进行 PID 计算
-            if (error > -20 && error < 20) {
-                integral += (float)error;
-            }
-            
-            if (integral > 1000.0f) integral = 1000.0f; 
-            if (integral < 0.0f)    integral = 0.0f; 
-
-            pid_out = Kp * error + Ki * integral + Kd * (error - last_error);
-            last_error = error;
+        // 【神技 1：误差反转（越过目标）时，瞬间大砍积分旧账】
+        // 当你捏住又松手时，光线瞬间变亮，误差从 正(+25) 瞬间变成 负(-3)
+        // 此时之前的“要变亮”的积分完全成了累赘，直接将其削减 50% 实现“极速退饱和”
+        if ((error < 0 && last_error > 0) || (error > 0 && last_error < 0)) {
+            integral *= 0.5f; 
         }
+
+        // 【修改 2：放宽积分分离区间，让它能顺滑接管】
+        if (error > -35 && error < 35) {
+            integral += (float)error;
+        }
+        
+        if (integral > 1000.0f) integral = 1000.0f; 
+        if (integral < 0.0f)    integral = 0.0f; 
+
+        // 【修改 3：彻底移除导致卡死的“死区冻结(Deadzone)”逻辑】
+        // 光照不需要死区，直接让公式时刻计算，微小的底噪靠浮点转整型就自然过滤了
+        pid_out = Kp * error + Ki * integral;
+        last_error = error;
         
         // 输出限幅
         if (pid_out > 100.0f) pid_out = 100.0f;
@@ -95,8 +96,9 @@ void Run_Background_Task(void) {
 
         LED_SetBrightness((uint8_t)pid_out);
     } else {
-        // 手动模式：不进行 PID 输出，仅同步积分器以保证切回自动时的平滑
-        integral = (float)LED_GetBrightness() / 0.2f; 
+        // 手动模式：同步必须与上面的 Ki 保持绝对一致
+        float Ki = 0.1f; 
+        integral = (float)LED_GetBrightness() / Ki; 
         last_error = 0;
         last_pid_out = (float)LED_GetBrightness();
     }
@@ -110,6 +112,7 @@ void Run_Background_Task(void) {
         float m_f = MQ2_GetPPM();
         // 格式: temp, mq2, humi, light
         sprintf(sendBuffer, "%.2f,%.2f,%d,%d\n", t_f, m_f, current_humi, current_light);
+
         ESP8266_SendData(sendBuffer);
     }
 
