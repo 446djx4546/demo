@@ -5,7 +5,7 @@ import pyqtgraph as pg
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QLineEdit, 
                              QGroupBox, QRadioButton, QSpinBox, QDoubleSpinBox, 
-                             QSlider, QGridLayout, QMessageBox)
+                             QSlider, QGridLayout, QMessageBox, QCheckBox)  # 【修改1：增加了 QCheckBox】
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 
 # ==========================================
@@ -15,8 +15,8 @@ class TCPClientThread(QThread):
     data_received = pyqtSignal(float, float, int, int)
     status_updated = pyqtSignal(str, bool)
     
-    # 【新增】：同步数据专用信号
-    sync_received = pyqtSignal(int, int, int, int, int, int, int, int, int)
+    # 【修改2】：同步数据信号增加到 10 个参数，最后一个代表 led_switch 状态
+    sync_received = pyqtSignal(int, int, int, int, int, int, int, int, int, int)
 
     def __init__(self):
         super().__init__()
@@ -41,7 +41,6 @@ class TCPClientThread(QThread):
             self.status_updated.emit("✅ 连接成功，正在同步数据...", True)
             self.socket.settimeout(None) 
             
-            # 【新增】：连接成功后，稍微延时确保单片机就绪，然后发送同步请求
             time.sleep(0.5) 
             self.send_command("GET_SYNC\n")
             
@@ -60,16 +59,20 @@ class TCPClientThread(QThread):
                     if not line:
                         continue
                     
-                    # 【新增】：拦截并解析同步数据包
+                    # 【修改3】：拦截并解析包含 10 个参数的同步数据包
                     if line.startswith("SYNC:"):
                         try:
                             vals = line[5:].split(',')
-                            if len(vals) == 9:
+                            if len(vals) == 10:
+                                t1, t2, h, m, l, mode, led, servo, motor, led_sw = map(int, vals)
+                                self.sync_received.emit(t1, t2, h, m, l, mode, led, servo, motor, led_sw)
+                            elif len(vals) == 9:
+                                # 兼容单片机尚未更新代码的旧情况，默认开关为开(1)
                                 t1, t2, h, m, l, mode, led, servo, motor = map(int, vals)
-                                self.sync_received.emit(t1, t2, h, m, l, mode, led, servo, motor)
+                                self.sync_received.emit(t1, t2, h, m, l, mode, led, servo, motor, 1)
                         except Exception as e:
                             print(f"解析同步包失败: {e}")
-                        continue # 处理完同步包直接跳过，不要当下发数据解析
+                        continue 
                     
                     # 原本的波形数据解析
                     vals = line.split(',')
@@ -120,13 +123,11 @@ class MainWindow(QMainWindow):
         self.tcp_thread = TCPClientThread()
         self.tcp_thread.data_received.connect(self.update_charts)
         self.tcp_thread.status_updated.connect(self.update_connection_status)
-        # 【新增】：绑定同步信号到处理函数
         self.tcp_thread.sync_received.connect(self.sync_ui_from_mcu)
 
         self.init_ui()
 
     def init_ui(self):
-        # 这里的布局代码与你刚才完全一致，无需改动
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QHBoxLayout(central_widget)
@@ -151,14 +152,22 @@ class MainWindow(QMainWindow):
         group_conn.setLayout(layout_conn)
         left_panel.addWidget(group_conn)
 
-        group_mode = QGroupBox("运行模式设置")
+        group_mode = QGroupBox("系统控制设置")
         layout_mode = QHBoxLayout()
         self.radio_auto = QRadioButton("自动模式 (Auto)")
         self.radio_manual = QRadioButton("手动模式 (Manual)")
         self.radio_auto.setChecked(True)
         self.radio_auto.toggled.connect(self.on_mode_changed)
+        
+        # 【修改4】：新增 LED 总开关 CheckBox
+        self.checkbox_led_switch = QCheckBox("LED 总开关 (允许点亮)")
+        self.checkbox_led_switch.setChecked(True)
+        self.checkbox_led_switch.setStyleSheet("font-weight: bold; color: #d35400;")
+        self.checkbox_led_switch.toggled.connect(self.on_led_switch_changed)
+        
         layout_mode.addWidget(self.radio_auto)
         layout_mode.addWidget(self.radio_manual)
+        layout_mode.addWidget(self.checkbox_led_switch)
         group_mode.setLayout(layout_mode)
         left_panel.addWidget(group_mode)
 
@@ -197,7 +206,7 @@ class MainWindow(QMainWindow):
         self.label_motor_val = QLabel("0%")
         self.slider_motor.valueChanged.connect(lambda v: self.label_motor_val.setText(f"{v}%"))
 
-        layout_ctrl.addWidget(QLabel("LED 亮度:"), 0, 0); layout_ctrl.addWidget(self.slider_led, 0, 1); layout_ctrl.addWidget(self.label_led_val, 0, 2)
+        layout_ctrl.addWidget(QLabel("LED 预设亮度:"), 0, 0); layout_ctrl.addWidget(self.slider_led, 0, 1); layout_ctrl.addWidget(self.label_led_val, 0, 2)
         layout_ctrl.addWidget(QLabel("舵机 角度:"), 1, 0); layout_ctrl.addWidget(self.slider_servo, 1, 1); layout_ctrl.addWidget(self.label_servo_val, 1, 2)
         layout_ctrl.addWidget(QLabel("排风机速度:"), 2, 0); layout_ctrl.addWidget(self.slider_motor, 2, 1); layout_ctrl.addWidget(self.label_motor_val, 2, 2)
         
@@ -238,16 +247,14 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(right_panel, stretch=3)
         self.on_mode_changed()
 
-    # 【新增】：处理来自单片机的同步数据
-    def sync_ui_from_mcu(self, t1, t2, h, m, l, mode, led, servo, motor):
-        # 1. 设置阈值 (SpinBox 没有自动发送命令的绑定，所以直接赋值安全)
+    # 【修改5】：增加参数 led_sw，并在 UI 上同步
+    def sync_ui_from_mcu(self, t1, t2, h, m, l, mode, led, servo, motor, led_sw):
         self.spin_t_max.setValue(t1)
         self.spin_t2_max.setValue(t2)
         self.spin_h_max.setValue(h)
         self.spin_m_max.setValue(m)
         self.spin_l_max.setValue(l)
 
-        # 2. 设置模式 (必须先屏蔽信号，否则会触发 on_mode_changed 导致重复发数据)
         self.radio_auto.blockSignals(True)
         self.radio_manual.blockSignals(True)
         if mode == 0:
@@ -257,7 +264,11 @@ class MainWindow(QMainWindow):
         self.radio_auto.blockSignals(False)
         self.radio_manual.blockSignals(False)
 
-        # 3. 设置手动滑块状态 (也需要屏蔽信号防止自动触发下发指令)
+        # 同步 LED 总开关
+        self.checkbox_led_switch.blockSignals(True)
+        self.checkbox_led_switch.setChecked(led_sw == 1)
+        self.checkbox_led_switch.blockSignals(False)
+
         self.slider_led.blockSignals(True)
         self.slider_servo.blockSignals(True)
         self.slider_motor.blockSignals(True)
@@ -276,14 +287,11 @@ class MainWindow(QMainWindow):
         self.slider_servo.blockSignals(False)
         self.slider_motor.blockSignals(False)
         
-        # 依据最新模式，刷新一次界面的控件禁用状态 (但不发送网络指令)
         is_auto = self.radio_auto.isChecked()
         self.group_auto_settings.setEnabled(True)
         self.group_manual_settings.setEnabled(not is_auto)
         
-        # 提示用户
         self.label_status.setText("✅ 参数同步完成，正在监控数据...")
-        # QMessageBox.information(self, "同步成功", "已成功从单片机拉取最新参数！")
 
     def toggle_connection(self):
         if not self.tcp_thread.is_running:
@@ -317,6 +325,14 @@ class MainWindow(QMainWindow):
         self.group_auto_settings.setEnabled(True)
         self.group_manual_settings.setEnabled(not is_auto)
         cmd = "MODE:AUTO\n" if is_auto else "MODE:MANUAL\n"
+        self.tcp_thread.send_command(cmd)
+
+    # 【修改6】：增加总开关向单片机发送指令的逻辑
+    def on_led_switch_changed(self, checked):
+        if not self.tcp_thread.is_running:
+            return # 未连接时不提示，因为可能只是在操作UI
+        state = 1 if checked else 0
+        cmd = f"SWITCH:{state}\n"
         self.tcp_thread.send_command(cmd)
 
     def send_thresholds(self):
