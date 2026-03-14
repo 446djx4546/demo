@@ -61,21 +61,29 @@ uint16_t Key_GetADCValue(void)
   */
 uint8_t Key_GetNum(void)
 {
-    uint16_t adc_value = Key_GetADCValue();
+    uint32_t adc_sum = 0;
+    for(int i = 0; i < 3; i++) {
+        adc_sum += Key_GetADCValue();
+    }
+    uint16_t adc_value = adc_sum / 3;
+
     uint8_t current_key = 0;
 
     // 1. 获取当前按下的是哪个键
-    if (adc_value < 200) {
-        current_key = 1; // SW1
+    if (adc_value < 400) {
+        current_key = 1; // SW1 (原 0~200 的扩大版)
     } 
-    else if (adc_value > 500 && adc_value < 900) {
-        current_key = 2; // SW2
+    else if (adc_value < 1450) {
+        current_key = 2; // SW2 (原 500~900 的扩大版)
     } 
-    else if (adc_value > 2000 && adc_value < 2400) {
-        current_key = 3; // SW3
+    else if (adc_value < 2380) {
+        current_key = 3; // SW3 (原 2000~2400 的扩大版)
     } 
-    else if (adc_value > 2400 && adc_value < 2700) {
-        current_key = 4; // SW4
+    else if (adc_value < 3500) {
+        current_key = 4; // SW4 (原 2400~2700 的扩大版)
+    }
+    else {
+        current_key = 0; // >= 3500 认为是未按下状态
     }
 
     // 2. 核心边缘检测逻辑（静态变量会记住上一次的值）

@@ -26,7 +26,8 @@ int temp_limit_2 = 35;
 int humi_limit = 70;       
 int gas_limit  = 1000;   
 int target_light = 50;     // 新增：目标光照恒定值 (0~100)
-uint8_t sys_mode = 0;      
+uint8_t sys_mode = 0;
+uint8_t led_switch_state = 1;
 
 /* ================== 全局传感器缓存 ================== */
 float current_temp = 0.0f;
@@ -94,9 +95,21 @@ void Run_Background_Task(void) {
 
         last_pid_out = pid_out;
 
-        LED_SetBrightness((uint8_t)pid_out);
+        if (led_switch_state == 1) {
+            LED_SetBrightness((uint8_t)pid_out);
+        } else {
+            LED_SetBrightness(0);
+            integral = 0;
+        }
+        
     } else {
         // 手动模式：同步必须与上面的 Ki 保持绝对一致
+        if (led_switch_state == 1) {
+            LED_SetBrightness((uint8_t)Store_Data[5]);
+        } else {
+            LED_SetBrightness(0);
+        }
+
         float Ki = 0.1f; 
         integral = (float)LED_GetBrightness() / Ki; 
         last_error = 0;
@@ -119,7 +132,7 @@ void Run_Background_Task(void) {
     // =========================================================================
     // 3. 传感器读取与报警仲裁区 (每 10 次执行，约 500ms)
     // =========================================================================
-    if (loop_tick % 5 == 0) {
+    if (loop_tick % 2 == 0) {
 
         // 1. 读取温湿度和气体传感器
         current_temp = Thermal_GetTemp();
@@ -131,15 +144,15 @@ void Run_Background_Task(void) {
         float target_servo = 0.0f;      
 
         if (current_temp >= temp_limit_2) {
-            need_alarm = 1; target_motor = 10; target_servo = 90.0f;
+            need_alarm = 1; target_motor = 20; target_servo = 90.0f;
         } else if (current_temp >= temp_limit_1) {
-            need_alarm = 1; target_motor = 10;
+            need_alarm = 1; target_motor = 20;
         }
         if (current_humi >= humi_limit) {
-            need_alarm = 1; target_motor = 10;
+            need_alarm = 1; target_motor = 20;
         }
         if (current_ppm >= gas_limit) {
-            need_alarm = 1; target_motor = 10; target_servo = 90.0f;
+            need_alarm = 1; target_motor = 20; target_servo = 90.0f;
         }
 
         // 3. 统一执行慢速外设控制 (仅在 AUTO 模式下)
@@ -176,6 +189,12 @@ void Load_Settings_From_Flash(void) {
         Store_Data[7] = 100;    
         Store_Data[8] = 35;     
         Store_Data[9] = 50;     // 默认光照目标恒定为 50%
+        Store_Data[10] = 1;
+        Store_Save();
+    }
+
+    if (Store_Data[10] != 0 && Store_Data[10] != 1) {
+        Store_Data[10] = 1;
         Store_Save();
     }
     
@@ -184,9 +203,15 @@ void Load_Settings_From_Flash(void) {
     gas_limit    = Store_Data[3];
     sys_mode     = Store_Data[4];
     temp_limit_2 = Store_Data[8];
-    target_light = Store_Data[9]; 
+    target_light = Store_Data[9];
+    led_switch_state = Store_Data[10]; 
     
-    LED_SetBrightness((uint8_t)Store_Data[5]);
+    if (led_switch_state == 1) {
+        LED_SetBrightness((uint8_t)Store_Data[5]);
+    } else {
+        LED_SetBrightness(0);
+    }
+    
     if(Store_Data[6]) Servo_SetAngle(90.0f); else Servo_SetAngle(0.0f);
     Motor_SetSpeed((int)Store_Data[7] - 100); 
 }
@@ -219,7 +244,6 @@ void Show_InformationFunc(void){
             OLED_ShowString(3, 1, "Motor: ");
             if(motor_speed < 0) { OLED_ShowChar(3, 8, '-'); motor_speed = -motor_speed; } else { OLED_ShowChar(3, 8, '+'); }
             OLED_ShowNum(3, 9, motor_speed, 3); OLED_ShowString(3, 12, "   "); 
-            OLED_ShowString(4, 1, "    <Page 2>    ");
         }
 
         uint8_t key = Key_GetNum();
@@ -320,18 +344,35 @@ void Sys_Mode_Func(void) {
     }
 }
 
-void Manual_LED_Func(void) {
-    if (sys_mode == 0) { OLED_Clear(); OLED_ShowString(2, 1, "MANUAL MODE ONLY"); Delay_ms(1000); OLED_Clear(); return; }
-    uint8_t led_val = LED_GetBrightness();
+void LED_Switch_Func(void) {
     OLED_Clear();
     while(1) {
         Run_Background_Task(); 
+        OLED_ShowString(1, 1, "LED Switch:");
+        if (led_switch_state == 1) OLED_ShowString(2, 1, "> ON       ");
+        else                       OLED_ShowString(2, 1, "> OFF      ");
+        
+        uint8_t key = Key_GetNum();
+        if (key == 1 || key == 3) { Store_Data[10] = led_switch_state; Store_Save(); OLED_Clear(); break; }
+        if (key == 2 || key == 4) led_switch_state = !led_switch_state; 
+        Delay_ms(50);
+    }
+}
+
+void Manual_LED_Func(void) {
+    if (sys_mode == 0) { OLED_Clear(); OLED_ShowString(2, 1, "MANUAL MODE ONLY"); Delay_ms(1000); OLED_Clear(); return; }
+    
+    // 读取内部存储的预期设置值，而不是硬件实际值 (以防目前总开关关断导致硬件值为0)
+    uint8_t led_val = Store_Data[5]; 
+    OLED_Clear();
+    while(1) {
+        Run_Background_Task(); // 因为后台在跑，只要改变 Store_Data[5]，灯就会实时亮暗(前提是总开关开着)
         OLED_ShowString(1, 1, "Manual LED PWM:");
         OLED_ShowNum(2, 1, led_val, 3);
         uint8_t key = Key_GetNum();
         if (key == 1 || key == 3) { Store_Data[5] = led_val; Store_Save(); OLED_Clear(); break; }
-        if (key == 2 && led_val <= 90) { led_val += 10; LED_SetBrightness(led_val); }
-        if (key == 4 && led_val >= 10) { led_val -= 10; LED_SetBrightness(led_val); }
+        if (key == 2 && led_val <= 90) { led_val += 10; Store_Data[5] = led_val; }
+        if (key == 4 && led_val >= 10) { led_val -= 10; Store_Data[5] = led_val; }
         Delay_ms(50);
     }
 }
@@ -380,6 +421,7 @@ void MenuInit() {
     rootNode = 
     SetNode(DIR_type, "Main Menu", SetBranch(
         SetNode(EXE_type, "View Info", Show_InformationFunc), 
+        SetNode(EXE_type, "LED Switch", LED_Switch_Func),
         
         SetNode(DIR_type, "Sensor Thres", SetBranch(
             SetNode(EXE_type, "Temp Thres 1", Set_Temp_Limit_1_Func), 

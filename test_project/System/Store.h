@@ -4,7 +4,7 @@
 #include "stm32f10x.h"
 
 // 暴露给外部的数据数组
-extern uint16_t Store_Data[10];
+extern uint16_t Store_Data[16];
 
 void Store_Init(void);
 void Store_Save(void);

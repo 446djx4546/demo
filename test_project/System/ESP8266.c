@@ -14,7 +14,8 @@ extern int gas_limit;
 extern int humi_limit;
 extern int target_light;
 extern uint8_t sys_mode;
-extern uint16_t Store_Data[10];
+extern uint8_t led_switch_state;
+extern uint16_t Store_Data[16];
 
 char ESP8266_RX_BUF[128];
 uint16_t ESP8266_RX_STA = 0;
@@ -144,12 +145,31 @@ void ESP8266_ParseCommand(void)
     else if (strstr(ESP8266_RX_BUF, "GET_SYNC")) {
         char syncBuffer[80];
         // 将单片机内的真实数据打包 (注意 Motor 速度需要 -100 还原真实值)
-        // 格式: SYNC:t1,t2,h,m,l,mode,led,servo,motor
-        sprintf(syncBuffer, "SYNC:%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
+        // 格式: SYNC:t1,t2,h,m,l,mode,led,servo,motor,led_switch
+        sprintf(syncBuffer, "SYNC:%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
                 temp_limit_1, temp_limit_2, humi_limit, gas_limit, target_light,
-                sys_mode, Store_Data[5], Store_Data[6], (int)Store_Data[7] - 100);
+                sys_mode, Store_Data[5], Store_Data[6], (int)Store_Data[7] - 100,
+                led_switch_state);
         
         ESP8266_SendData(syncBuffer);
+    }
+    else if (strstr(ESP8266_RX_BUF, "SWITCH:")) {
+        char *cmd_sw = strstr(ESP8266_RX_BUF, "SWITCH:");
+        int sw_val = 0;
+        if (sscanf(cmd_sw + 7, "%d", &sw_val) == 1) {
+            led_switch_state = (uint8_t)sw_val;
+            Store_Data[10] = led_switch_state;
+            Store_Save();
+
+            if (led_switch_state == 1) {
+                if (sys_mode == 1) {
+                    LED_SetBrightness((uint8_t)Store_Data[5]);
+                }
+            } else {
+                LED_SetBrightness(0);
+            }
+        }
+    
     }
     // 3. 解析阈值设置 (格式: THRES:Temp,MQ2,Humi,Light)
     else {
@@ -179,6 +199,12 @@ void ESP8266_ParseCommand(void)
             int led, servo, motor;
             if (sscanf(cmd_ctrl + 5, "%d,%d,%d", &led, &servo, &motor) == 3) {
                 // 直接驱动底层硬件
+                if (led_switch_state == 1) {
+                    LED_SetBrightness((uint8_t)led);
+                } else {
+                    LED_SetBrightness(0);
+                }
+
                 LED_SetBrightness((uint8_t)led);
                 Servo_SetAngle((float)servo);
                 Motor_SetSpeed(motor);
